@@ -98,4 +98,4 @@ class Parser(object):
         self.thrifty_push(ts, fobj)
         fobj.close()
         ts_end = datetime.datetime.now()
-        print '* file %s processed at %s' % (fname, str(ts_end - ts_start))
+        print '* file %s processed at %s\n' % (fname, str(ts_end - ts_start))

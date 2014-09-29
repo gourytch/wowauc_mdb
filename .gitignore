@@ -1,0 +1,7 @@
+*~
+*.bak
+./var/
+./db/
+*.pyc
+*.pyo
+*.pyd

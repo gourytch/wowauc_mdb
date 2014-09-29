@@ -2,8 +2,42 @@
 # -*- coding: utf-8 -*-
 #
 
+##############################################################################
+##
+## дополнительные поля
+##   snapshot :
+##      region, realm, house -- идентификатор AH
+##      time -- таймштамп серверного времени
+##
+##   opened :
+##      region, realm, house -- идентификатор AH
+##      success
+##      time {
+##          opened
+##          lastseen
+##          raised
+##          deadline {
+##              min
+##              max
+##          }
+##
+##   closed / expired :
+##      region, realm, house -- идентификатор AH
+##      time {
+##          opened
+##          lastseen
+##          raised
+##          deadline {
+##              min
+##              max
+##          }
+##
+
 import pymongo
 import datetime
+import pdb
+#import pprint
+#pp = pprint.PrettyPrinter(indent = 4)
 
 minutes_left = {
     'SHORT'     : (       0,      30 ),
@@ -18,6 +52,16 @@ def guess_expiration(t, timeLeft):
     t_min = t + datetime.timedelta(0, 60 * p[0])
     t_max = t + datetime.timedelta(0, 60 * p[1])
     return {'min':t_min, 'max':t_max}
+
+
+def mapfmt(name, M):
+    spc = '\n' + (' ' * (len(name) + 3))
+    maxlen1 = max((len(unicode(x)) for x in M.keys()))
+    maxlen2 = max((len(unicode(x)) for x in M.values()))
+    return name + ' : ' + (
+        spc.join(("%-*s = %*s" % ( maxlen1, unicode(x),
+                                    maxlen2, unicode(M[x]))
+                for x in sorted(M.keys()))))
 
 
 class Pusher_MongoDB (object):
@@ -178,9 +222,9 @@ class Pusher_MongoDB (object):
         ret = self.__process_snapshot()
         if self.__debug:
             print "... session finished"
-            print "    spent: %s " % str(ret['ts_done'] - ret['ts_start'])
-            print "    stats: %s " % ret['statistic']
-            print "    sizes: %s " % ret['sizes']
+            print "    spent : %s " % str(ret['ts_done'] - ret['ts_start'])
+            print mapfmt("    stats", ret['statistic'])
+            print mapfmt("    sizes", ret['sizes'])
         self.__push_id = None
         return ret
 
@@ -202,9 +246,12 @@ class Pusher_MongoDB (object):
         num_opened      = 0
         num_closed      = 0
         num_raised      = 0
+        num_adjusted    = 0
         num_expired     = 0
-        num_changed     = 0
         sssize = snapshot.count()
+
+#        print "snapshot.count() = %d" % snapshot.count()
+#        print "opened.count()   = %d" % opened.count()
 
         for auc in opened.find({
             'region'    : self.__region,
@@ -214,56 +261,70 @@ class Pusher_MongoDB (object):
             for r in snapshot.find({'auc':auc['auc']}):
                 found = True
                 changed = False
+                auc['time']['lastseen'] = r['time']
                 if auc['bid'] != r['bid']:
 #                    if self.__debug:
 #                        print "[%d]: bid raised from %d to %d" % (
 #                            auc['auc'], auc['bid'], r['bid'])
                     auc['bid'] = r['bid']
                     auc['success'] = True
-                    auc['session_refs']['raised'] = self.__push_id;
-                    changed = True
+                    auc['time']['raised'] = r['time'];
                     num_raised = num_raised + 1
                 if auc['timeLeft'] != r['timeLeft']:
-                    e = auc['guessed_expiration']
-                    t = guess_expiration(self.__time, r['timeLeft'])
+                    e = auc['time']['deadline']
+                    t = guess_expiration(r['time'], r['timeLeft'])
                     if t['max'] < e['max']:
 #                        if self.__debug:
 #                            print "[%d] expiration corrected %s->%s" % (
 #                            auc['bid'],
 #                            e['max'].strftime('%Y%m%d %H%M%S'),
 #                            t['max'].strftime('%Y%m%d %H%M%S'))
-                        auc['guessed_expiraion'] = t
-                        changed = True
+                        auc['time']['deadline'] = t
+                        num_adjusted = num_adjusted + 1
                 # end if
                 snapshot.remove({'_id': r['_id']})
             #end for
             if found:
-                if changed:
-                    opened.update({'_id': auc['_id']}, auc)
-                    num_changed = num_changed + 1
+                opened.update({'_id': auc['_id']}, auc)
             else:
-                if not auc.get('success', False):
-                    e = auc['guessed_expiration']
-#                    auc['success'] = (self.__time < e['max']) # ?
-                    auc['success'] = (self.__time < e['min']) # stricter
+                # opened auction not seen in last snapshot
                 opened.remove ({'_id': auc['_id']})
-                auc['session_refs']['closed'] = self.__push_id;
-                if auc['success']:
-#                    if self.__debug:
-#                        print "[%d] bought" % auc['auc']
+                auc['time']['closed'] = self.__time
+                is_success = auc['success']
+                del auc['success']
+                e = auc['time']['deadline']
+                is_expired = e['min'] < auc['time']['closed']  # stricter
+                auc['result'] = []
+
+                if is_success or not is_expired:
+                    auc['result'].append('success')
+                    if auc['time']['raised']:
+                        auc['result'].append('bid')
+                    if not is_expired:
+                        auc['result'].append('buyout')
                     closed.insert(auc)
                     num_closed = num_closed + 1
                 else:
+                    auc['result'].append('expired')
                     expired.insert(auc)
                     num_expired = num_expired + 1
             #end if
         #end for
+
+        # add all unprocessed recors in snapshot as new opened lots
         for auc in snapshot.find():
-            t = guess_expiration(self.__time, auc['timeLeft'])
-            auc['guessed_expiration'] = t
+            t = auc['time']
+            auc['time'] = {
+                'opened'    : t,
+                'lastseen'  : t,
+                'closed'    : None,
+                'raised'    : None,
+                'deadline'  : guess_expiration(self.__time, auc['timeLeft'])
+            }
+            # import pdb; pdb.set_trace()
+
             auc['success'] = False
             snapshot.remove({'_id': auc['_id']})
-            auc['session_refs'] = {'opened': self.__push_id};
             opened.insert(auc)
 #            if self.__debug:
 #                print "[%d] opened" % (auc['auc'])
@@ -278,8 +339,8 @@ class Pusher_MongoDB (object):
                     'opened'        : num_opened,
                     'closed'        : num_closed,
                     'raised'        : num_raised,
+                    'adjusted'      : num_adjusted,
                     'expired'       : num_expired,
-                    'changed'       : num_changed,
                 },
                 'sizes': {
                     'snapshot' : sssize,
@@ -288,6 +349,7 @@ class Pusher_MongoDB (object):
                     'expired'  : expired.count(),
                 },
             }})
+        # end for
         return self.__db['push_sessions'].find({'_id':self.__push_id})[0]
 
 
@@ -322,13 +384,17 @@ class Pusher_MongoDB (object):
             ('region', pymongo.ASCENDING),
             ('realm', pymongo.ASCENDING),
             ('house', pymongo.ASCENDING),])
-        self.__db['closed'].create_index([('time', pymongo.ASCENDING)])
+        self.__db['closed'].create_index([('time.opened', pymongo.ASCENDING)])
+        self.__db['closed'].create_index([('time.lastseen', pymongo.ASCENDING)])
+        self.__db['closed'].create_index([('time.closed', pymongo.ASCENDING)])
 
         self.__db['expired'].create_index([
             ('region', pymongo.ASCENDING),
             ('realm', pymongo.ASCENDING),
             ('house', pymongo.ASCENDING),])
-        self.__db['expired'].create_index([('time', pymongo.ASCENDING)])
+        self.__db['expired'].create_index([('time.opened', pymongo.ASCENDING)])
+        self.__db['expired'].create_index([('time.lastseen', pymongo.ASCENDING)])
+        self.__db['expired'].create_index([('time.closed', pymongo.ASCENDING)])
 
         self.__db['push_sessions'].create_index([
             ('region', pymongo.ASCENDING),
@@ -341,3 +407,9 @@ class Pusher_MongoDB (object):
         return
 
 ### EOF ###
+if __name__ == '__main__':
+    print mapfmt('test format', {
+        u'кака'     :       10,
+        u'бяка'     :     1100,
+        u'и'        :       12,
+        u'закаляка' : 12345678})
