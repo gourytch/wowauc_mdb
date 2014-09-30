@@ -23,9 +23,9 @@ for arg in argv[1:]:
 
 pusher = Pusher(debug=debug)
 pusher.connect('mongodb://localhost:27017/', 'wowauc')
+
 if erase:
-    pusher.erase()
-    pusher.create_indexes()
+    pusher.recreate()
 
 pusher.fix()
 

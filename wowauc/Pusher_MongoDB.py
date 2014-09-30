@@ -36,25 +36,52 @@
 import pymongo
 import datetime
 import pdb
+import random
+
 #import pprint
 #pp = pprint.PrettyPrinter(indent = 4)
 
-minutes_left = {
-    'SHORT'     : (       0,      30 ),
-    'MEDIUM'    : (      30,  2 * 60 ),
-    'LONG'      : (  2 * 60, 12 * 60 ),
-    'VERY_LONG' : ( 12 * 60, 48 * 60 ),
+intervals = {
+    'SHORT'     : {
+                    'min' : datetime.timedelta(0,0),
+                    'max' : datetime.timedelta(0, 60 * 30)
+                  },
+    'MEDIUM'    : {
+                    'min' : datetime.timedelta(0, 60 * 30),
+                    'max' : datetime.timedelta(0, 2 * 3600)
+                  },
+    'LONG'      : {
+                    'min' : datetime.timedelta(0,  2 * 3600),
+                    'max' : datetime.timedelta(0, 12 * 3600)
+                  },
+    'VERY_LONG' : {
+                    'min' : datetime.timedelta(0, 12 * 3600),
+                    'max' : datetime.timedelta(2, 0)
+                  }
 }
 
+random.seed()
+
+def random_timedelta(dt):
+    """ вычисление случайного интервала, не превышающего заданный """
+    return datetime.timedelta(0, dt.total_seconds() * random.random())
+
+
+def random_datetime(t1, t2):
+    """ вычисление случайного  времени из диапазона """
+    t1, t2 = min(t1, t2), max(t1, t2)
+    return t1 + random_timedelta(t2 - t1)
+
+
 def guess_expiration(t, timeLeft):
+    """ временнЫе рамки для именованного диапазона """
     assert type(t) is datetime.datetime
-    p = minutes_left[timeLeft]
-    t_min = t + datetime.timedelta(0, 60 * p[0])
-    t_max = t + datetime.timedelta(0, 60 * p[1])
-    return {'min':t_min, 'max':t_max}
+    p = intervals[timeLeft]
+    return {'min': t + p['min'], 'max': t + p['max']}
 
 
 def mapfmt(name, M):
+    """ красиво форматируем табличку ключ = значение """
     spc = '\n' + (' ' * (len(name) + 3))
     maxlen1 = max((len(unicode(x)) for x in M.keys()))
     maxlen2 = max((len(unicode(x)) for x in M.values()))
@@ -62,6 +89,11 @@ def mapfmt(name, M):
         spc.join(("%-*s = %*s" % ( maxlen1, unicode(x),
                                     maxlen2, unicode(M[x]))
                 for x in sorted(M.keys()))))
+
+
+def printmap(name, M):
+    print mapfmt(name, M)
+    return
 
 
 class Pusher_MongoDB (object):
@@ -79,6 +111,8 @@ class Pusher_MongoDB (object):
         self.__realm    = None
         self.__house    = None
         self.__time     = None
+        self.__bulk     = None
+        self.__bulk_dirty   = False
         return
 
 
@@ -88,6 +122,8 @@ class Pusher_MongoDB (object):
         """
         if self.__debug:
             print "create client for uri %s and base %s" % (uri, dbname)
+        self.__uri    = uri
+        self.__dbname = dbname
         self.__client = pymongo.MongoClient(uri)
         self.__db     = self.__client[dbname]
 
@@ -173,12 +209,12 @@ class Pusher_MongoDB (object):
             'done'      : False,
             'ts_done'   : None,
             })
-        n = self.__db['snapshot'].count()
-        if n > 0:
-            print "REMOVE %d ITEMS FROM OLD SNAPSHOT" % n
-            self.__db['snapshot'].remove({})
         # с этого момента надо иметь ввиду,
         # что у нас может быть активна сессия загрузки данных
+        snapshot = self.__db['snapshot']
+        snapshot.create_index([('auc', pymongo.ASCENDING)])
+        self.__bulk = snapshot.initialize_unordered_bulk_op()
+        self.__bulk_dirty = False
         return self.__push_id
 
 
@@ -193,7 +229,9 @@ class Pusher_MongoDB (object):
         lot['realm']    = self.__realm
         lot['house']    = self.__house
         lot['time']     = self.__time
-        self.__db['snapshot'].insert(lot)
+        # self.__db['snapshot'].insert(lot)
+        self.__bulk.insert(lot)
+        self.__bulk_dirty = True
         return
 
 
@@ -204,6 +242,8 @@ class Pusher_MongoDB (object):
         if self.__debug:
             print "abort push session"
         assert self.is_started(), "push session not started"
+        self.__bulk = None
+        self.__bulk_dirty = False
         self.__push_id = None
         return
 
@@ -215,14 +255,12 @@ class Pusher_MongoDB (object):
         (количество открытых/закрытых/выкупленных позиций)
         """
         assert self.is_started(), "push session not started"
-
         if self.__debug:
-            print "finish push session"
-
+            print "update collections"
         ret = self.__process_snapshot()
         if self.__debug:
-            print "... session finished"
-            print "    spent : %s " % str(ret['ts_done'] - ret['ts_start'])
+            print "... session finished, spent : %s " \
+                % str(ret['ts_done'] - ret['ts_start'])
             print mapfmt("    stats", ret['statistic'])
             print mapfmt("    sizes", ret['sizes'])
         self.__push_id = None
@@ -239,10 +277,28 @@ class Pusher_MongoDB (object):
         #    о том, был ли лот выкуплен или же был просрочен
         # 2. оставшиеся записи снапшота перемещаем в открытые аукционы
         #
+
+        if self.__bulk_dirty:
+            if self.__debug:
+                print "execute for collected bulk"
+            result = self.__bulk.execute()
+        self.__bulk = None
+        self.__bulk_dirty = None
+
         opened = self.__db['opened']
         closed = self.__db['closed']
         expired = self.__db['expired']
         snapshot = self.__db['snapshot']
+
+        bulk_opened     = opened.initialize_unordered_bulk_op()
+        bulk_closed     = closed.initialize_unordered_bulk_op()
+        bulk_expired    = expired.initialize_unordered_bulk_op()
+        bulk_snapshot   = snapshot.initialize_unordered_bulk_op()
+        bulk_opened_dirty   = False
+        bulk_closed_dirty   = False
+        bulk_expired_dirty  = False
+        bulk_snapshot_dirty = False
+
         num_opened      = 0
         num_closed      = 0
         num_raised      = 0
@@ -267,69 +323,138 @@ class Pusher_MongoDB (object):
 #                        print "[%d]: bid raised from %d to %d" % (
 #                            auc['auc'], auc['bid'], r['bid'])
                     auc['bid'] = r['bid']
-                    auc['success'] = True
                     auc['time']['raised'] = r['time'];
                     num_raised = num_raised + 1
                 if auc['timeLeft'] != r['timeLeft']:
+                    # сменился диапазон времени
                     e = auc['time']['deadline']
-                    t = guess_expiration(r['time'], r['timeLeft'])
-                    if t['max'] < e['max']:
-#                        if self.__debug:
-#                            print "[%d] expiration corrected %s->%s" % (
-#                            auc['bid'],
-#                            e['max'].strftime('%Y%m%d %H%M%S'),
-#                            t['max'].strftime('%Y%m%d %H%M%S'))
-                        auc['time']['deadline'] = t
-                        num_adjusted = num_adjusted + 1
+                    # предполагаем, что это произошло где-то
+                    # между предыдущим и текущим обновлением
+                    # но не позже старого deadline
+                    t_hit = (auc['time']['lastseen'] +
+                        datetime.timedelta(0, int(
+                            (r['time'] - auc['time']['lastseen'])
+                            .total_seconds() * random.random())))
+                    if auc['time']['deadline'] < t_hit:
+                        t_hit = auc['time']['deadline']
+                    # это гарантированно изменение интервала,
+                    # так что можно заложиться
+                    # на максимально возможное значение
+                    t = guess_expiration(t_hit, r['timeLeft'])['max']
+                    auc['time']['deadline'] = t
+                    num_adjusted = num_adjusted + 1
                 # end if
-                snapshot.remove({'_id': r['_id']})
+                bulk_snapshot.find({'_id':r['_id']}).remove_one()
+                bulk_snapshot_dirty = True
             #end for
             if found:
-                opened.update({'_id': auc['_id']}, auc)
+                bulk_opened.find({'_id': auc['_id']}).replace_one(auc)
+                bulk_opened_dirty = True
             else:
                 # opened auction not seen in last snapshot
-                opened.remove ({'_id': auc['_id']})
+                bulk_opened.find({'_id': auc['_id']}).remove_one()
                 auc['time']['closed'] = self.__time
-                is_success = auc['success']
-                del auc['success']
-                e = auc['time']['deadline']
-                is_expired = e['min'] < auc['time']['closed']  # stricter
+                is_raised = 'raised' in auc['time']
+                is_expired = auc['time']['deadline'] < auc['time']['closed']
                 auc['result'] = []
 
-                if is_success or not is_expired:
+                if is_raised or not is_expired:
                     auc['result'].append('success')
-                    if auc['time']['raised']:
-                        auc['result'].append('bid')
+                    if is_raised:
+                        auc['result'].append('raised')
                     if not is_expired:
                         auc['result'].append('buyout')
-                    closed.insert(auc)
+                    bulk_closed.insert(auc)
+                    bulk_closed_dirty = True
                     num_closed = num_closed + 1
                 else:
                     auc['result'].append('expired')
-                    expired.insert(auc)
+                    bulk_expired.insert(auc)
+                    bulk_expired_dirty = True
                     num_expired = num_expired + 1
             #end if
         #end for
 
+        # обработали все opened записи.
+        # удалим все обработанные snapshot-записи
+        if bulk_snapshot_dirty:
+            result = bulk_snapshot.execute()
+        del bulk_snapshot
+        del bulk_snapshot_dirty
+
+#            if self.__debug:
+#                printmap("bulk_snapshot execution result", result)
+#        elif self.__debug:
+#                print "bulk_snapshot is clean."
+
+        # найдём, когда была предыдущая заливка
+        ts_prev = None
+        try:
+            ts_prev = self.__db['push_sessions'].find({
+                'region'    : self.__region,
+                'realm'     : self.__realm,
+                'house'     : self.__house,
+                'done'      : True,
+                }).sort('time', pymongo.DESCENDING).limit(1)[0]['time']
+        except IndexError:
+            if self.__debug:
+                print "? previous session not found. seems first session ever )"
+
         # add all unprocessed recors in snapshot as new opened lots
         for auc in snapshot.find():
             t = auc['time']
+            t_dead1 = guess_expiration(self.__time, auc['timeLeft'])['min']
+            if ts_prev is None:
+                # мы не знаем, когда был открыт этот аукцион даже примерно
+                # значит выставим минимальное время
+                t_deadline = t_dead1
+            else:
+                # в прошлый раз этого лота не было
+                t_deadline = guess_expiration(ts_prev, auc['timeLeft'])['max']
+                if t_deadline < t_dead1:
+                    # но слишком уж много времени прошло с того раза :)
+                    t_deadline = t_dead1
+
             auc['time'] = {
                 'opened'    : t,
                 'lastseen'  : t,
                 'closed'    : None,
                 'raised'    : None,
-                'deadline'  : guess_expiration(self.__time, auc['timeLeft'])
+                'deadline'  : t_deadline
             }
             # import pdb; pdb.set_trace()
-
-            auc['success'] = False
-            snapshot.remove({'_id': auc['_id']})
-            opened.insert(auc)
+            bulk_opened.insert(auc)
+            bulk_opened_dirty = True
 #            if self.__debug:
 #                print "[%d] opened" % (auc['auc'])
             num_opened = num_opened + 1
         #end for
+
+        # применяем всё обработанное окончательно
+
+        if bulk_opened_dirty:
+            result = bulk_opened.execute()
+#            if self.__debug:
+#                printmap("bulk_opened execution result", result)
+#        elif self.__debug:
+#                print "bulk_opened is clean"
+
+        if bulk_closed_dirty:
+            result = bulk_closed.execute()
+#            if self.__debug:
+#                printmap("bulk_closed execution result", result)
+#        elif self.__debug:
+#                print "bulk_closed is clean"
+
+        if bulk_expired_dirty:
+            result = bulk_expired.execute()
+#            if self.__debug:
+#                printmap("bulk_closed execution result", result)
+#        elif self.__debug:
+#                print "bulk_expired is clean"
+
+        self.__db.drop_collection(snapshot)
+
         self.__db['push_sessions'].update(
             {'_id':self.__push_id},
             {'$set': {
@@ -353,13 +478,18 @@ class Pusher_MongoDB (object):
         return self.__db['push_sessions'].find({'_id':self.__push_id})[0]
 
 
-    def erase(self):
-        print "ERASE ALL DATA IN DATABASE"
-        self.__db['opened'].remove({})
-        self.__db['closed'].remove({})
-        self.__db['expired'].remove({})
-        self.__db['snapshot'].remove({})
-        self.__db['push_sessions'].remove({})
+    def recreate(self):
+        print "*** [[[ RECREATE DATABASE ]]] ***"
+        self.__client.drop_database(self.__dbname)
+        self.__db = self.__client[self.__dbname]
+#        self.__db['opened'].remove({})
+#        self.__db['closed'].remove({})
+#        self.__db['expired'].remove({})
+#        self.__db['snapshot'].remove({})
+#        self.__db['push_sessions'].remove({})
+        self.create_indexes()
+        print "*** [[[ DATABASE RECREATED ]]] ***"
+        return
 
 
     def fix(self):
@@ -378,7 +508,6 @@ class Pusher_MongoDB (object):
         self.__db['opened'].create_index([('auc', pymongo.ASCENDING)])
         self.__db['closed'].create_index([('auc', pymongo.ASCENDING)])
         self.__db['expired'].create_index([('auc', pymongo.ASCENDING)])
-        self.__db['snapshot'].create_index([('auc', pymongo.ASCENDING)])
 
         self.__db['closed'].create_index([
             ('region', pymongo.ASCENDING),
@@ -399,11 +528,9 @@ class Pusher_MongoDB (object):
         self.__db['push_sessions'].create_index([
             ('region', pymongo.ASCENDING),
             ('realm', pymongo.ASCENDING),
-            ('house', pymongo.ASCENDING)])
-
-        self.__db['push_sessions'].create_index([
-            ('time', pymongo.ASCENDING),
-            ('done', pymongo.ASCENDING)])
+            ('house', pymongo.ASCENDING),
+            ('done', pymongo.ASCENDING),
+            ('time', pymongo.DESCENDING)])
         return
 
 ### EOF ###
