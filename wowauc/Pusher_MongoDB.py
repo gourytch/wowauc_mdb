@@ -126,6 +126,7 @@ class Pusher_MongoDB (object):
         self.__dbname = dbname
         self.__client = pymongo.MongoClient(uri)
         self.__db     = self.__client[dbname]
+        self.__db.set_profiling_level(pymongo.OFF)
 
         if self.__debug:
             print "...created"
@@ -211,9 +212,7 @@ class Pusher_MongoDB (object):
             })
         # с этого момента надо иметь ввиду,
         # что у нас может быть активна сессия загрузки данных
-        snapshot = self.__db['snapshot']
-        snapshot.create_index([('auc', pymongo.ASCENDING)])
-        self.__bulk = snapshot.initialize_unordered_bulk_op()
+        self.__bulk = self.__db['snapshot'].initialize_unordered_bulk_op()
         self.__bulk_dirty = False
         return self.__push_id
 
@@ -453,7 +452,8 @@ class Pusher_MongoDB (object):
 #        elif self.__debug:
 #                print "bulk_expired is clean"
 
-        self.__db.drop_collection(snapshot)
+#        self.__db.drop_collection(snapshot)
+        snapshot.remove({})
 
         self.__db['push_sessions'].update(
             {'_id':self.__push_id},
@@ -505,6 +505,7 @@ class Pusher_MongoDB (object):
 
     def create_indexes(self):
         print "... create indexes"
+        self.__db['snapshot'].create_index([('auc', pymongo.ASCENDING)])
         self.__db['opened'].create_index([('auc', pymongo.ASCENDING)])
         self.__db['closed'].create_index([('auc', pymongo.ASCENDING)])
         self.__db['expired'].create_index([('auc', pymongo.ASCENDING)])
