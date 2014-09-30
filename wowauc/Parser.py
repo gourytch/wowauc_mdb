@@ -49,15 +49,21 @@ class Parser(object):
                 v = eval(r.group(1))
                 realm = v['name']
                 slug  = v['slug']
-                self.__pusher.touch_realm(self.__region, realm, slug, self.__locale)
+                if self.__pusher.need(self.__region, realm, ts):
+                    self.__pusher.touch_realm(
+                        self.__region, realm, slug, self.__locale)
+                    self.__pusher.start(self.__region, realm, ts)
+                elif self.__debug:
+                    print "skip %s @ %s" % (realm, ts)
                 continue # переходим к следующей строчке
+
 
             #"alliance":{"auctions":[
             r = rx_ah_start.search(s)
             if r:
                 house = r.group(1)
-                if self.__pusher.need(self.__region, realm, house, ts):
-                    self.__pusher.start(self.__region, realm, house, ts)
+                if self.__pusher.is_started():
+                    self.__pusher.set_AH(house)
                 elif self.__debug:
                     print "skip %s/%s @ %s" % (realm, house, ts)
                 continue # следующие строчки - данные аукционного дома
@@ -70,13 +76,13 @@ class Parser(object):
                     v = eval(r.group(1))
                     self.__pusher.push(v)
                 if r.group(2) != ',': # последний лот AH
-                    if self.__pusher.is_started():
-                        self.__pusher.finish()
                     house = None
                 continue
 
             r = rx_end.search(s)
             if r:
+                if self.__pusher.is_started():
+                    self.__pusher.finish()
                 break;
 
             print "? %s" % s

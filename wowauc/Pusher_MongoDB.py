@@ -163,7 +163,7 @@ class Pusher_MongoDB (object):
         return
 
 
-    def need(self, region, realm, house, wowts):
+    def need(self, region, realm, wowts):
         """
         проверить, нужно ли добавление данных для данного времени
         """
@@ -172,7 +172,6 @@ class Pusher_MongoDB (object):
         return self.__db['push_sessions'].find({
             'region'    : region,
             'realm'     : realm,
-            'house'     : house,
             'time'      : {'$gte': wowts},
             'done'      : True,}).count() == 0
 
@@ -184,27 +183,25 @@ class Pusher_MongoDB (object):
         return self.is_connected() and self.__push_id is not None
 
 
-    def start(self, region, realm, house, wowts):
+    def start(self, region, realm, wowts):
         """
-        начинаем сессию добавления данных для аукциона
+        начинаем сессию добавления данных для всех аукционов реалма
         """
         if self.__debug:
-            print "start push session for (%s, %s, %s, %s)" \
-            % (region, realm, house, wowts)
+            print "start push session for (%s, %s, %s)" \
+            % (region, realm, wowts)
         assert self.is_connected(), "not connected to database"
-        assert self.need(region, realm, house, wowts), "duplicate/obsolete"
+        assert self.need(region, realm, wowts), "duplicate/obsolete"
         assert not self.is_started(), "push session already started"
 
         self.__region   = region
         self.__realm    = realm
-        self.__house    = house
         self.__time     = wowts
         self.__ts_start = datetime.datetime.now()
 
         self.__push_id = self.__db['push_sessions'].insert({
             'region'    : self.__region,
             'realm'     : self.__realm,
-            'house'     : self.__house,
             'time'      : self.__time,
             'ts_start'  : self.__ts_start,
             'done'      : False,
@@ -215,6 +212,11 @@ class Pusher_MongoDB (object):
         self.__bulk = self.__db['snapshot'].initialize_unordered_bulk_op()
         self.__bulk_dirty = False
         return self.__push_id
+
+
+    def set_AH(self, house):
+        self.__house = house
+        return
 
 
     def push(self, lot):
@@ -310,8 +312,8 @@ class Pusher_MongoDB (object):
 
         for auc in opened.find({
             'region'    : self.__region,
-            'realm'     : self.__realm,
-            'house'     : self.__house}):
+            'realm'     : self.__realm
+            }):
             found = False
             for r in snapshot.find({'auc':auc['auc']}):
                 found = True
@@ -392,7 +394,6 @@ class Pusher_MongoDB (object):
             ts_prev = self.__db['push_sessions'].find({
                 'region'    : self.__region,
                 'realm'     : self.__realm,
-                'house'     : self.__house,
                 'done'      : True,
                 }).sort('time', pymongo.DESCENDING).limit(1)[0]['time']
         except IndexError:
@@ -529,7 +530,6 @@ class Pusher_MongoDB (object):
         self.__db['push_sessions'].create_index([
             ('region', pymongo.ASCENDING),
             ('realm', pymongo.ASCENDING),
-            ('house', pymongo.ASCENDING),
             ('done', pymongo.ASCENDING),
             ('time', pymongo.DESCENDING)])
         return
