@@ -55,6 +55,7 @@ class Parser(object):
                     self.__pusher.start(self.__region, realm, ts)
                 elif self.__debug:
                     print "skip %s @ %s" % (realm, ts)
+                    break
                 continue # переходим к следующей строчке
 
 
@@ -64,8 +65,8 @@ class Parser(object):
                 house = r.group(1)
                 if self.__pusher.is_started():
                     self.__pusher.set_AH(house)
-                elif self.__debug:
-                    print "skip %s/%s @ %s" % (realm, house, ts)
+#                elif self.__debug:
+#                    print "skip %s/%s @ %s" % (realm, house, ts)
                 continue # следующие строчки - данные аукционного дома
 
 
@@ -86,6 +87,7 @@ class Parser(object):
                 break;
 
             print "? %s" % s
+        # end while
         return
 
 

@@ -175,16 +175,16 @@ class Pusher_CachedMongoDB (object):
         self.__openset.update(self.__opened)
         self.__unsaved = False
         if self.__debug:
-            print "%d opened positions were load" % len(self.__opened)
+            print "%d opened positions were loaded" % len(self.__opened)
         return
 
 
     def save_opened(self):
         assert self.is_connected()
         assert not self.is_started()
-        assert self.__region is not None
-        assert self.__realm is not None
         if self.__unsaved:
+            assert self.__region is not None
+            assert self.__realm is not None
             self.__db['opened'].remove({'region': self.__region,
                                          'realm': self.__realm})
             if len(self.__opened):
@@ -341,19 +341,30 @@ class Pusher_CachedMongoDB (object):
             self.__bulk_expired.execute()
 
         self.__ts_done = datetime.datetime.now()
-        if self.__debug:
-            print "... session finished, spent : %s " \
-                % str(self.__ts_done - self.__ts_start)
-            printmap("    stats", {
-                    'opened'    : self.__num_opened,
-                    'raised'    : self.__num_raised,
-                    'adjusted'  : self.__num_adjusted,
-                    'closed'    : self.__num_closed,
-                    'expired'   : self.__num_expired,})
-            printmap("    sizes", {
+
+        s = self.__db['push_sessions'].find({'_id':self.__push_id})[0]
+        s['done']        = True
+        s['ts_done']     = self.__ts_done
+        s['statistic']   = {
+                    'opened'        : self.__num_opened,
+                    'closed'        : self.__num_closed,
+                    'raised'        : self.__num_raised,
+                    'adjusted'      : self.__num_adjusted,
+                    'expired'       : self.__num_expired,
+                }
+        s['sizes']       = {
                     'opened'    : len(self.__opened),
                     'closed'    : self.__db['closed'].count(),
-                    'expired'   : self.__db['expired'].count(),})
+                    'expired'   : self.__db['expired'].count(),
+                }
+
+        if self.__debug:
+            print "... session finished, spent : %s " \
+                % str(s['ts_done'] - s['ts_start'])
+            printmap("    stats", s['statistic'])
+            printmap("    sizes", s['sizes'])
+
+        self.__db['push_sessions'].save(s)
         self.__push_id = None
         return
 
