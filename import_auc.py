@@ -3,11 +3,13 @@
 #
 
 from wowauc.Parser import Parser
-from wowauc.Pusher_MongoDB import Pusher_MongoDB as Pusher
+#from wowauc.Pusher_MongoDB import Pusher_MongoDB as Pusher
+from wowauc.Pusher_CachedMongoDB import Pusher_CachedMongoDB as Pusher
 from sys import argv
 from glob import glob
 from argparse import ArgumentParser
 from sys import argv
+import datetime
 
 erase=False
 debug=False
@@ -31,6 +33,13 @@ pusher.fix()
 
 parser = Parser(pusher, debug=debug)
 
+ts_start = datetime.datetime.now()
+count = 0
 for d in dirs:
-    for f in sorted(glob(d + '/*.json')):
+    files = sorted(glob(d + '/*.json'))
+    count = count + len(files)
+    for f in files:
         parser.parse_file(f)
+pusher.save_opened()
+ts_end = datetime.datetime.now()
+print '* %d files processed at %s\n' % (count, str(ts_end - ts_start))
