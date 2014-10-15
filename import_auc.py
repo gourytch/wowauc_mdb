@@ -13,11 +13,15 @@ import datetime
 
 erase=False
 debug=False
+greedy=True
+
 url='mongodb://localhost:27017/'
 dirs = []
 for arg in argv[1:]:
     if arg == '--new':
         erase = True
+    if arg == '--thrifty':
+        greedy = False
     elif arg == '--debug':
         debug = True
     else:
@@ -39,7 +43,7 @@ for d in dirs:
     files = sorted(glob(d + '/*.json'))
     count = count + len(files)
     for f in files:
-        parser.parse_file(f)
+        parser.parse_file(f, greedy)
 pusher.save_opened()
 ts_end = datetime.datetime.now()
 print '* %d files processed at %s\n' % (count, str(ts_end - ts_start))
