@@ -15,7 +15,15 @@ erase=False
 debug=False
 greedy=True
 
-url='mongodb://localhost:27017/'
+exec file("wowauc.conf", "rt").read()
+
+if "db_uri" not in dir():
+    db_uri = 'mongodb://localhost:27017/'
+
+if "db_name" not in dir():
+    db_name = 'wowauc'
+
+
 dirs = []
 for arg in argv[1:]:
     if arg == '--new':
@@ -28,7 +36,7 @@ for arg in argv[1:]:
         dirs.append(arg)
 
 pusher = Pusher(debug=debug)
-pusher.connect('mongodb://localhost:27017/', 'wowauc')
+pusher.connect(db_uri, db_name)
 
 if erase:
     pusher.recreate()

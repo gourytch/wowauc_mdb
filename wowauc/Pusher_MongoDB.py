@@ -479,17 +479,24 @@ class Pusher_MongoDB (object):
         return self.__db['push_sessions'].find({'_id':self.__push_id})[0]
 
 
-    def recreate(self):
+    def recreate_db(self):
         print "*** [[[ RECREATE DATABASE ]]] ***"
         self.__client.drop_database(self.__dbname)
         self.__db = self.__client[self.__dbname]
-#        self.__db['opened'].remove({})
-#        self.__db['closed'].remove({})
-#        self.__db['expired'].remove({})
-#        self.__db['snapshot'].remove({})
-#        self.__db['push_sessions'].remove({})
         self.create_indexes()
         print "*** [[[ DATABASE RECREATED ]]] ***"
+        return
+
+
+    def recreate(self):
+        print "*** [[[ RECREATE TABLES ]]] ***"
+        self.__db['opened'].remove({})
+        self.__db['closed'].remove({})
+        self.__db['expired'].remove({})
+        self.__db['snapshot'].remove({})
+        self.__db['push_sessions'].remove({})
+        self.create_indexes()
+        print "*** [[[ TABLES RECREATED ]]] ***"
         return
 
 

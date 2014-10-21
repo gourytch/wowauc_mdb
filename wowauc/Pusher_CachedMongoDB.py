@@ -463,20 +463,26 @@ class Pusher_CachedMongoDB (object):
         return
 
 
-    def recreate(self):
-        assert self.is_connected()
-        assert not self.is_started()
-        assert not self.__unsaved
+    def recreate_db(self):
         print "*** [[[ RECREATE DATABASE ]]] ***"
         self.__client.drop_database(self.__dbname)
         self.__db = self.__client[self.__dbname]
-#        self.__db['opened'].remove({})
-#        self.__db['closed'].remove({})
-#        self.__db['expired'].remove({})
-#        self.__db['snapshot'].remove({})
-#        self.__db['push_sessions'].remove({})
         self.create_indexes()
         print "*** [[[ DATABASE RECREATED ]]] ***"
+        return
+
+
+    def recreate(self):
+        print "*** [[[ RECREATE TABLES ]]] ***"
+        self.__db['opened'].remove({})
+        self.__db['closed'].remove({})
+        self.__db['expired'].remove({})
+        self.__db['snapshot'].remove({})
+        self.__db['push_sessions'].remove({})
+        self.__db['items'].remove({})
+        self.__db['items_need'].remove({})
+        self.create_indexes()
+        print "*** [[[ TABLES RECREATED ]]] ***"
         return
 
 
@@ -524,6 +530,12 @@ class Pusher_CachedMongoDB (object):
             ('realm', pymongo.ASCENDING),
             ('done', pymongo.ASCENDING),
             ('time', pymongo.DESCENDING)])
+
+        self.__db['items'].create_index([
+            ('item', pymongo.ASCENDING),
+            ])
+
+
         return
 
 ### EOF ###
