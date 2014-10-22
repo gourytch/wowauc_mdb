@@ -281,5 +281,5 @@ if __name__ == '__main__':
         db.recreate()
     ids = db.calc_ids_for_fetch()
     fetch_items (db, ids)
-    db.close()
+    db.disconnect()
     print "done"
