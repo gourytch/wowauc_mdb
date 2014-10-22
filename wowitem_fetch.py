@@ -86,7 +86,6 @@ class Mongo_Base:
         """
         if not self.is_connected():
             return
-        assert not self.is_started(), "push session not finished"
         if self.__debug:
             print "diconnect from database"
         self.__client = None
