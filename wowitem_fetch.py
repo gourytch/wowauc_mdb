@@ -266,7 +266,7 @@ def fetch_items(db, ids):
                 print "%06d-%s retcode %d" % (iid, loc, retcode)
                 print "url: %s" % url
                 print ""
-                db.put(iid, loc, '{"item":%d, "error": "%d"}' % (iid, retcode))
+                db.put(loc, '{"id":%d, "error": "%d"}' % (iid, retcode))
         # end for loc in locales
     # end for id in ids
 
