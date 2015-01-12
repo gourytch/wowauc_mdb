@@ -47,6 +47,7 @@ import os.path
 import glob
 import codecs
 import cPickle as pickle
+import collections
 
 #import pprint
 #pp = pprint.PrettyPrinter(indent = 4)
@@ -68,7 +69,25 @@ intervals = {
                     'min' : datetime.timedelta(0, 12 * 3600),
                     'max' : datetime.timedelta(2, 0)
                   }
+            }
+
+
+FIELDS = {
+    'auc_modifiers': ['type', 'value'],
+    'auc_bonusLists': ['bonusListId'],
+    'auc': ['auc', 'item', 'owner', 'ownerRealm',
+        'bid', 'buyout', 'quantity',
+        'timeLeft',
+        'rand', 'seed', 'context',
+        'bonusLists', 'modifiers',
+        'petSpeciesId', 'petBreedId', 'petLevel', 'petQualityId'],
+    'meta' : ['region', 'realm', 'id',
+            'ts_opened', 'ts_deadline', 'ts_lastseen',
+            'ts_raised', 'ts_closed',
+            'is_success', 'is_buyout',
+            'bid_first', 'bid_last'],
 }
+
 
 random.seed()
 
@@ -107,8 +126,15 @@ def mapfmt(name, M):
 def wrap(M):
     """свернём то, что надо, перед отправкой в JSON"""
     for k in M:
-        if isinstance(M[k], dict):
+        if isinstance(M[k], dict) \
+        or isinstance(M[k], collections.OrderedDict):
             M[k] = wrap(M[k]) # рекурсивно сворачиваем
+        elif isinstance(M[k], list) \
+        or isinstance(M[k], tuple):
+            V = []
+            for v in M[k]:
+                V.append(wrap(v))
+            M[k] = V
         elif isinstance(M[k], datetime.datetime):
             M[k] = M[k].isoformat()
         elif isinstance(M[k], unicode):
@@ -117,18 +143,60 @@ def wrap(M):
 
 
 def unwrap(M):
-    """развернём то, что надо, послк получения из JSON"""
+    """развернём то, что надо, после получения из JSON"""
     rx_ts = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\d{2}$')
     for k in M:
-        if isinstance(M[k], dict):
+        if isinstance(M[k], dict) \
+        or isinstance(M[k], collections.OrderedDict):
             M[k] = unwrap(M[k]) # рекурсивно разворачиваем
-        elif isinstance(M[k], str) or isinstance(M[k], unicode):
+        elif isinstance(M[k], list) \
+        or isinstance(M[k], tuple):
+            V = []
+            for v in M[k]:
+                V.append(unwrap(v))
+            M[k] = V
+        elif isinstance(M[k], str) \
+        or isinstance(M[k], unicode):
             if rx_ts.match(M[k]):
                 M[k] = dateutil.parser.parse(M[k])
             elif isinstance(M[k], str):
                 M[k] = M[k].decode('utf8')
     return M
 
+
+def mkOrderedDict(src, path):
+    global FIELDS
+    flist = FIELDS[path]
+
+    def pwn(obj, path, name):
+        if isinstance(obj, dict) \
+        or collections.OrderedDict():
+            return mkOrderedDict(obj, path + "_" + name)
+        elif isinstance(obj, list) \
+        or isinstance(obj, tuple):
+            V = []
+            for v in obj:
+                V.append(pwn(v, path, name))
+            return V
+        return obj
+
+    dst = collections.OrderedDict()
+    for f in flist:
+        if f in src:
+            dst[f] = pwn(src[f], path, f)
+    for f in src:
+        if f not in dst:
+            print "WARN: not in flist by path '%s': '%s'" % (path, f)
+            dst[f] = pwn(src[f], path, f)
+    return dst
+
+
+def aucOrderedDict(auc):
+    return mkOrderedDict(wrap(auc), 'auc')
+
+
+def metaOrderedDict(meta):
+    return mkOrderedDict(wrap(meta), 'meta')
 
 
 def dtstr(sec):
@@ -153,8 +221,9 @@ def memory_usage_resource():
     return mem
 
 
-def print_memory_usage():
-    print ("Memory used: %.2f MiB" %  memory_usage_resource())
+def print_memory_usage(title=""):
+    print ("Memory used %s: %.2f MiB" %  (title, memory_usage_resource()))
+
 
 class SnapshotProcessor (object):
     """
@@ -176,6 +245,7 @@ class SnapshotProcessor (object):
         self.__name_state     = basedir + "/" + region + "-" + realm + "-session_state.pickle"
         self.__name_finished  = basedir + "/" + region + "-" + realm + "-closed-finished.txt"
         self.__name_expired   = basedir + "/" + region + "-" + realm + "-closed-expired.txt"
+        self.__name_meta      = basedir + "/" + region + "-" + realm + "-closed-meta.txt"
 
         self.__region   = region
         self.__realm    = realm
@@ -188,6 +258,8 @@ class SnapshotProcessor (object):
         self.__openset  = sets.Set() # auc's in opened
         self.__seenset  = sets.Set() # auc's in snapshot
         self.__started  = False
+
+        self.__fields = {} # "/" - root fields, "/subfield" - subfields
 
         return
 
@@ -302,10 +374,8 @@ class SnapshotProcessor (object):
         объект лота - словарь
         """
         assert self.is_started(), "push session not started"
-        assert type(lot) is dict, "lot is not a dict but %s" % type(lot)
-        lot['region']   = self.__region
-        lot['realm']    = self.__realm
-        lot['time']     = self.__time
+        assert isinstance(lot, dict), \
+            "lot is not a dict instance but %s" % type(lot)
 
         id = lot['auc']
         if id in self.__opened:
@@ -334,7 +404,7 @@ class SnapshotProcessor (object):
                 "clset"   : len(clset)})
 
         for id in clset:
-            self.__lot_close(self.__opened[id])
+            self.__lot_close(id)
 
         self.__save_closed()
         self.__save_expired()
@@ -350,8 +420,12 @@ class SnapshotProcessor (object):
 
 
     def __lot_open(self, lot):
+        """
+        запись открытия лота по записи lot
+        """
         id = lot['auc']
-        t = lot['time']
+        t = self.__time
+
         t_dead1 = guess_expiration(self.__time, lot['timeLeft'])['min']
         if self.__prevtime is None:
             # мы не знаем, когда был открыт этот аукцион даже примерно
@@ -364,14 +438,45 @@ class SnapshotProcessor (object):
             if t_deadline < t_dead1:
                 # но слишком уж много времени прошло с того раза :)
                 t_deadline = t_dead1
-        lot['time'] = {
-            'opened'    : t,
-            'lastseen'  : t,
-            'closed'    : None,
-            'raised'    : None,
-            'deadline'  : t_deadline
+
+#        bundle = collections.OrderedDict([
+#            ('meta', collections.OrderedDict([
+#                ('region'           , self.__region),
+#                ('realm'            , self.__realm),
+#                ('id'               , id),
+#                ('ts_opened'        , t),
+#                ('ts_deadline'      , t_deadline),
+#                ('ts_lastseen'      , t),
+#                ('ts_raised'        , None),
+#                ('ts_closed'        , None),
+#                ('is_success'       , None),  # true=куплен false=просрочен
+#                ('is_buyout'        , None),  # true=buyout false=by bid
+#                ('bid_first'        , lot['bid']),
+#                ('bid_last'         , lot['bid']),
+#            ])),
+#            ('data', lot),
+#        ])
+
+
+        bundle = {
+            'meta' : {
+                'region'            : self.__region,
+                'realm'             : self.__realm,
+                'id'                : id,
+                'ts_opened'         : t,
+                'ts_deadline'       : t_deadline,
+                'ts_lastseen'       : t,
+                'ts_raised'         : None,
+                'ts_closed'         : None,
+                'is_success'        : None,  # true=куплен false=просрочен
+                'is_buyout'         : None,  # true=buyout false=by bid
+                'bid_first'         : lot['bid'],
+                'bid_last'          : lot['bid'],
+            },
+            'data': lot,
         }
-        self.__opened[id] = lot
+
+        self.__opened[id] = bundle
         self.__unsaved = True
         self.__openset.add(id)
         self.__num_opened = self.__num_opened + 1
@@ -381,48 +486,49 @@ class SnapshotProcessor (object):
     def __lot_update(self, lot):
         id = lot['auc']
         opn = self.__opened[id]
-        if opn['bid'] != lot['bid']:
-            opn['bid'] = lot['bid']
-            opn['time']['raised'] = lot['time']
+        opn['meta']['ts_lastseen'] = self.__time
+        self.__unsaved = True
+        changed = False
+        if opn['data']['bid'] != lot['bid']:
+            changed = True
+            opn['meta']['ts_raised'] = self.__time
+            opn['meta']['bid_last'] = lot['bid']
             self.__num_raised = self.__num_raised + 1
-        if opn['timeLeft'] != lot['timeLeft']:
+        if opn['data']['timeLeft'] != lot['timeLeft']:
+            changed = True
             # сменился диапазон времени
             # предполагаем, что это произошло где-то
             # между предыдущим и текущим обновлением
             # но не позже старого deadline
-            t_hit = random_datetime(opn['time']['lastseen'], lot['time'])
-            if opn['time']['deadline'] < t_hit:
-                t_hit = opn['time']['deadline']
+            t_hit = random_datetime(opn['meta']['ts_lastseen'], self.__time)
+            if opn['meta']['ts_deadline'] < t_hit:
+                t_hit = opn['meta']['ts_deadline']
             # это гарантированно изменение интервала,
             # так что можно заложиться
             # на максимально возможное значение
-            t = guess_expiration(t_hit, opn['timeLeft'])['max']
-            opn['time']['deadline'] = t
-            opn['timeLeft'] = lot['timeLeft']
+            t = guess_expiration(t_hit, lot['timeLeft'])['max']
+            opn['meta']['ts_deadline'] = t
             self.__num_adjusted = self.__num_adjusted + 1
-        opn['time']['lastseen'] = lot['time']
-        self.__unsaved = True
+        if changed:
+            # replace/update lot record
+            opn['data'] = lot
         return
 
 
-    def __lot_close(self, lot):
-        lot['time']['closed'] = self.__time
-        is_raised = lot['time']['raised'] is not None
-        is_expired = lot['time']['deadline'] < lot['time']['closed']
-        lot['result'] = []
+    def __lot_close(self, id):
+        opn = self.__opened[id]
+        opn['meta']['ts_closed'] = self.__time
+        is_raised = opn['meta']['ts_raised'] is not None
+        is_expired = opn['meta']['ts_deadline'] < opn['meta']['ts_closed']
         if is_raised or not is_expired:
-            lot['result'].append('success')
-            if is_raised:
-                lot['result'].append('raised')
-            if not is_expired:
-                lot['result'].append('buyout')
-            self.__bulk_closed.append(lot)
+            opn['meta']['is_success'] = True
+            opn['meta']['is_buyout'] = not is_expired
+            self.__bulk_closed.append(opn)
             self.__num_closed = self.__num_closed + 1
         else:
-            lot['result'].append('expired')
-            self.__bulk_expired.append(lot)
+            opn['meta']['is_success'] = False
+            self.__bulk_expired.append(opn)
             self.__num_expired = self.__num_expired + 1
-        id = lot['auc']
         del self.__opened[id]
         self.__unsaved = True
         self.__openset.remove(id)
@@ -435,10 +541,13 @@ class SnapshotProcessor (object):
             return
         self.debug("save {} finished auction".format(len(self.__bulk_closed)))
 
-        F = codecs.open(self.__name_finished, 'at', "utf-8")
+        Fauc = codecs.open(self.__name_finished, 'at', "utf-8")
+        Fmeta = codecs.open(self.__name_meta, 'at', "utf-8")
         for R in self.__bulk_closed:
-            F.write(json.dumps(wrap(R), ensure_ascii=False, encoding='utf8') + "\n")
-        F.close()
+            Fauc.write(json.dumps(aucOrderedDict(R['data']), ensure_ascii=False, encoding='utf8') + "\n")
+            Fmeta.write(json.dumps(metaOrderedDict(R['meta']), ensure_ascii=False, encoding='utf8') + "\n")
+        Fauc.close()
+        Fmeta.close()
         return
 
 
@@ -448,11 +557,65 @@ class SnapshotProcessor (object):
             return
         self.debug("save {} expired auction".format(len(self.__bulk_expired)))
 
-        F = codecs.open(self.__name_expired, 'at', "utf-8")
+        Fauc = codecs.open(self.__name_expired, 'at', "utf-8")
+        Fmeta = codecs.open(self.__name_meta, 'at', "utf-8")
         for R in self.__bulk_expired:
-            F.write(json.dumps(wrap(R), ensure_ascii=False, encoding='utf8') + "\n")
-        F.close()
+            Fauc.write(json.dumps(aucOrderedDict(R['data']), ensure_ascii=False, encoding='utf8') + "\n")
+            Fmeta.write(json.dumps(metaOrderedDict(R['meta']), ensure_ascii=False, encoding='utf8') + "\n")
+#            F.write(json.dumps(wrap(R), ensure_ascii=False, encoding='utf8') + "\n")
+        Fauc.close()
+        Fmeta.close()
         return
+
+
+    def collect_fields(self, R, path = "/"):
+        if isinstance(R, dict):
+            prev_key = None
+            if path not in self.__fields:
+                self.__fields[path] = []
+            for k in R:
+                if k not in self.__fields[path]:
+                    if prev_key is None:
+                        print "(debug) add new field %s at top of %s" % (
+                            k, path)
+                        self.__fields[path].insert(0, k)
+                    else:
+                        print "(debug) add new field %s after %s in %s" % (
+                            k, prev_key, path)
+                        prev_ix = self.__fields[path].index(prev_key)
+                        self.__fields[path].insert(prev_ix + 1, k)
+                prev_key = k
+                v = R[k]
+                if isinstance(v, collections.OrderedDict) \
+                or isinstance(v, dict) \
+                or isinstance(v, list) \
+                or isinstance(v, tuple):
+                    subpath = path
+                    if subpath[-1] != "/":
+                        subpath += "/"
+                    subpath += k
+                    self.collect_fields(R[k], subpath)
+        elif isinstance(R, list) or isinstance(R, tuple):
+            for v in R:
+                if isinstance(v, collections.OrderedDict) \
+                or isinstance(v, dict) \
+                or isinstance(v, list) \
+                or isinstance(v, tuple):
+                    self.collect_fields(v, path)
+        else:
+            print "ignore type %s" % type(R)
+        return
+
+
+    def dump_fields(self):
+        print "fields = {"
+        for (k, v) in self.__fields.items():
+            print "  %s: [%s]," % (
+                k.replace('/', '_'),
+                ', '.join(["'%s'" % x for x in v]))
+        print "}"
+        return
+
 
     def process(self, fname):
         self.debug("process {}".format(fname))
@@ -472,8 +635,11 @@ class SnapshotProcessor (object):
         ts_start = datetime.datetime.now()
         self.debug("read json from file {}".format(fname))
 #        try:
+#        R = json.load(codecs.open(fname, 'r', 'utf-8'),
+#            object_pairs_hook=collections.OrderedDict)
         R = json.load(codecs.open(fname, 'r', 'utf-8'))
-        assert type(R) is dict, "not a dict but '{0}'".format(type(R))
+        assert isinstance(R, dict), \
+            "type is not a dict instance but '{0}'".format(type(R))
         assert "realm" in R, "have no 'realm' key"
         assert "name" in R['realm'], "have no realm.name"
         assert "slug" in R['realm'], "have no realm.slug"
@@ -485,14 +651,16 @@ class SnapshotProcessor (object):
         assert self.__realm == R['realm']['name']
 
         gc.collect()
+        print_memory_usage("before json")
         self.debug("json snapshot loaded. parse it")
         self.start(ts)
         for auc in R['auctions']['auctions']:
+#            self.collect_fields(auc, '/')
             self.push(auc)
         self.finish()
         ts_end = datetime.datetime.now()
         self.debug('* file %s processed at %s\n' % (fname, str(ts_end - ts_start)))
-        print_memory_usage()
+        print_memory_usage("after")
         gc.collect()
 #        except AssertionError as e:
 #            print("got assertion: {}".format(e))
@@ -502,16 +670,23 @@ class SnapshotProcessor (object):
 
 
     def processDir(self, dirname):
+        print_memory_usage("at start processDir")
         self.debug("process directory {}".format(dirname))
         mask = '????????_??????_{}_{}.json'.format(self.__region, self.__realm)
         for fname in sorted(glob.glob(dirname + "/" + mask)):
             self.process(fname)
+#       self.dump_fields()
+        print_memory_usage("at finish processDir")
         return
 
 
 ### EOF ###
 if __name__ == '__main__':
-    prc = SnapshotProcessor('./processed', 'eu', 'Fordragon', True, True)
+    prc = SnapshotProcessor(basedir = './processed',
+                            region  = 'eu',
+                            realm   = 'Fordragon',
+                            safe    = False,
+                            debug   = True)
     prc.load()
     prc.processDir('./input')
     prc.save(True)
