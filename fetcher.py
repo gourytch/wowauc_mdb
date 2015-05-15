@@ -32,8 +32,8 @@ except:
 
 if not FETCH_ONLY:
     from wowauc.Pusher_CachedMongoDB import Pusher_CachedMongoDB as Pusher
-    
-    
+
+
 CURDIR = os.path.dirname(os.path.abspath(__file__)) + "/"
 
 TMPDIR  = CURDIR + dir_fetching + "/"
@@ -108,6 +108,11 @@ def fetch(region, realm):
         PXY = os.getenv("http_proxy")
     if PXY:
         c.setopt(c.PROXY, PXY)
+        if DEBUG:
+            print "* use http proxy {0}".format(PXY)
+    else:
+        if DEBUG:
+            print "* use direct connection"
     c.setopt(c.ENCODING, 'gzip')
     c.setopt(c.FOLLOWLOCATION, True)
     c.setopt(c.HEADERFUNCTION, dumphdr)
