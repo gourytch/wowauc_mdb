@@ -9,7 +9,8 @@ import os.path
 import sys
 from wowauc.Parser import Parser
 
-exec file("wowauc.conf", "rt").read()
+CURDIR = os.path.dirname(os.path.abspath(__file__)) + "/"
+exec file(CURDIR + "/wowauc.conf", "rt").read()
 
 try:
     APIKEY = apikey
@@ -25,6 +26,11 @@ except:
     LOCALE = 'en_US'
 
 try:
+    PXY = http_proxy
+except:
+    PXY = os.getenv("http_proxy")
+
+try:
     FETCH_ONLY = fetch_only
 except:
     print "%% fetch_only is not set. assume False"
@@ -32,9 +38,6 @@ except:
 
 if not FETCH_ONLY:
     from wowauc.Pusher_CachedMongoDB import Pusher_CachedMongoDB as Pusher
-
-
-CURDIR = os.path.dirname(os.path.abspath(__file__)) + "/"
 
 TMPDIR  = CURDIR + dir_fetching + "/"
 SAVEDIR = CURDIR + dir_fetched + "/"
@@ -102,10 +105,6 @@ def fetch(region, realm):
     c.setopt(c.WRITEFUNCTION, buf.write)
     c.setopt(c.CONNECTTIMEOUT, 15)
     c.setopt(c.TIMEOUT, 15)
-    if "http_proxy" in dir():
-        PXY = http_proxy
-    else:
-        PXY = os.getenv("http_proxy")
     if PXY:
         c.setopt(c.PROXY, PXY)
         if DEBUG:
