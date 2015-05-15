@@ -4,6 +4,7 @@ cd $(dirname $(readlink -f $0))
 
 . wowauc.conf
 
+./check_fstree.sh
 (
 date +"started at %Y-%d-%m %H:%M:%S"
 python fetcher.py

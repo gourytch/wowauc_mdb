@@ -2,7 +2,8 @@
 set -e
 set -x
 
-cd $(dirname $0)
+cd $(dirname $(readlink -f $0))
 source ./wowauc.conf
+./check_fstree.sh
 exec ./zip-datadir.sh "$dir_fetched"
 

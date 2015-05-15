@@ -3,7 +3,7 @@
 cd $(dirname $(readlink -f $0))
 . wowauc.conf
 
-[ -d $dir_importing ] || mkdir -p $dir_importing
+./check_fstree.sh
 
 lock=$dir_importing/wowitem_fetch.lock
 if [ -e $lock ]; then
@@ -17,5 +17,5 @@ date +'%F %T' >$lock
   echo "FINISHED AT: $(date +'%F %T')"
   echo ""
   echo ""
-) >>var/log/wowitem_fetch.log 2>&1
+) >>$dir_log/wowitem_fetch.log 2>&1
 rm -f $lock
