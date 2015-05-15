@@ -2,11 +2,17 @@
 FROM debian:jessie
 MAINTAINER Lev "Gourytch" Babchenko <gour@mail.ru>
 
-WORKDIR /data
-VOLUME /data
-
 RUN apt-get update && apt-get -y dist-upgrade
 RUN apt-get install -y \
     python python-pycurl
 
+RUN useradd \
+  --uid 1000 --gid 100 --no-user-group \
+  --home /data --shell /bin/bash leech
+RUN chown -R leech:leech /data
+
+USER leech
+ENV HOME /data
+WORKDIR /data
+VOLUME /data
 CMD ["/bin/bash", "/data/wowauc_mdb/wowauc_fetch.sh"]
