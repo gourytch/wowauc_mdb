@@ -1,7 +1,11 @@
 *~
 *.bak
-./var/
-./db/
+var/
+db/
+input/
+processed/
+zipped/
+wowauc.conf
 *.pyc
 *.pyo
 *.pyd
