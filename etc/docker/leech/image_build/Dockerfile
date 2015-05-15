@@ -9,7 +9,7 @@ RUN apt-get install -y \
 RUN useradd \
   --uid 1000 --gid 100 --no-user-group \
   --home /data --shell /bin/bash leech
-RUN chown -R leech:leech /data
+RUN mkdir /data && chmod 0777 /data && chown -R leech:users /data
 
 USER leech
 ENV HOME /data
