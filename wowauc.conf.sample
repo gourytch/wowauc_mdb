@@ -53,6 +53,12 @@ dir_zipped_items="var/items_zipped"
 dir_etc="etc"
 dir_log="var/log"
 
+#
+# use fetch_only=True if you need only fetch data snapshot and check it.
+# (for rsync-ing)
+#
+fetch_only=False
+
 # WoW API Serrings
 
 # get your api key from https://dev.battle.net

@@ -8,7 +8,6 @@ import time
 import os.path
 import sys
 from wowauc.Parser import Parser
-from wowauc.Pusher_CachedMongoDB import Pusher_CachedMongoDB as Pusher
 
 exec file("wowauc.conf", "rt").read()
 
@@ -25,6 +24,16 @@ except:
     print "%% locale is not set. assume <en_US>"
     LOCALE = 'en_US'
 
+try:
+    FETCH_ONLY = fetch_only
+except:
+    print "%% fetch_only is not set. assume False"
+    FETCH_ONLY = False
+
+if not FETCH_ONLY:
+    from wowauc.Pusher_CachedMongoDB import Pusher_CachedMongoDB as Pusher
+    
+    
 CURDIR = os.path.dirname(os.path.abspath(__file__)) + "/"
 
 TMPDIR  = CURDIR + dir_fetching + "/"
@@ -173,15 +182,20 @@ def fetch(region, realm):
                 print "* retcode=%d" % retcode
             if retcode == 200:
                 if DEBUG:
-                    print "* good retcode. import data"
-                ### IMPORT ###
-                pusher = Pusher(debug=DEBUG)
-                pusher.connect('mongodb://localhost:27017/', 'wowauc')
-                pusher.fix()
-                parser = Parser(pusher, region=region, debug=DEBUG)
-                good, reason = parser.parse_file(tname, greedy=True)
-                pusher.save_opened()
-                ### END IMPORT ###
+                    if FETCH_ONLY:
+                        parser = Parser(None, region=region, debug=DEBUG)
+                        data, reason = parser.load_and_check(file(tname).read())
+                        good = data is not None
+                    else:
+                        print "* good retcode. import data"
+                        ### IMPORT ###
+                        pusher = Pusher(debug=DEBUG)
+                        pusher.connect('mongodb://localhost:27017/', 'wowauc')
+                        pusher.fix()
+                        parser = Parser(pusher, region=region, debug=DEBUG)
+                        good, reason = parser.parse_file(tname, greedy=True)
+                        pusher.save_opened()
+                        ### END IMPORT ###
                 if good:
                     if DEBUG:
                         print "* good data. rename results to %s" % sname
