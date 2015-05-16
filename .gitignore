@@ -1,11 +1,15 @@
 *~
 *.bak
+*.swp
+*.tmp
+*.bad
 var/
 db/
 input/
 processed/
 zipped/
 wowauc.conf
+wowauc-satellites.conf
 *.pyc
 *.pyo
 *.pyd

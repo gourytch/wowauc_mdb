@@ -1,0 +1,6 @@
+BASE="/data/wowauc_mdb"
+SSH_SATELLITES="user1@satellite1.mynet.net user2@satellite2.com user3@localhost"
+DAILY_DIRNAME=var/fetched
+RSYNC_DIRNAME=var/tmp/rsync-fetched
+DESTINATION="$DAILY_DIRNAME"
+LOGFILE="var/log/wowauc-collector.log"
