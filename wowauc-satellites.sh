@@ -1,10 +1,20 @@
 #! /bin/bash
 set -e
-# set -x
+set -x
 
 cd $(dirname $(readlink -f $0))
 . wowauc.conf
 . wowauc-satellites.conf
+
+do_clean=false
+case "$1" in
+--clean)
+  do_clean=true
+  ;;
+*)
+  ;;
+esac
+
 
 mkdir -p $DESTINATION
 echo "sources   : $SSH_SATELLITES"
@@ -12,6 +22,10 @@ echo "collector : $DESTINATION"
 
 for satellite in $SSH_SATELLITES
 do
+
+if $do_clean
+then
+############
 
 cat << __EOF_CAT__
 
@@ -41,5 +55,14 @@ cd $BASE
 rmdir $RSYNC_DIRNAME
 __EOF_CLEANUP__
 
-done
+#################
+else # ! do_clean
+#################
 
+src="$satellite:$BASE/$DAILY_DIRNAME/"
+rsync -cruvz "$src" --exclude '*.bad' --exclude '*.tmp' $DESTINATION 2>&1 | tee -ai "${LOGFILE}"
+
+#################
+fi
+
+done
