@@ -237,7 +237,7 @@ class SnapshotProcessor (object):
 
         self.__basedir  = basedir
         if not os.path.exists(self.__basedir):
-            self.debug("create bas directory '{}'".format(self.__basedir))
+            self.debug("create base directory '{}'".format(self.__basedir))
             os.makedirs(self.__basedir, 0755)
         assert(os.path.isdir(self.__basedir))
 
@@ -261,6 +261,9 @@ class SnapshotProcessor (object):
 
         self.__fields = {} # "/" - root fields, "/subfield" - subfields
 
+        self.debug("SnapshotProcessor ready to work")
+        self.debug("   base directory: {}".format(self.__basedir))
+        self.debug("   region.realm  : {}.{}".format(self.__region, self.__realm))
         return
 
 
@@ -682,11 +685,18 @@ class SnapshotProcessor (object):
 
 ### EOF ###
 if __name__ == '__main__':
-    prc = SnapshotProcessor(basedir = './processed',
+    import sys
+    input_dir = "input"
+    output_dir = "processed"
+    if 1 < len(sys.argv):
+        input_dir = sys.argv[1]
+        if 2 < len(sys.argv):
+            output_dir = sys.argv[2]
+    prc = SnapshotProcessor(basedir = output_dir,
                             region  = 'eu',
                             realm   = 'Fordragon',
                             safe    = False,
                             debug   = True)
     prc.load()
-    prc.processDir('./input')
+    prc.processDir(input_dir)
     prc.save(True)

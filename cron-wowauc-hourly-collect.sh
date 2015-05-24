@@ -4,18 +4,12 @@ cd "$BASE"
 . wowauc.conf
 
 (
+set -e
 echo ""
 echo "=== v v v === $(basename $0) started at $(date +'%F %T')"
-(
-set -e
 ./check_fstree.sh
-./wowauc-satellites.sh --clean
+./wowauc-satellites.sh
 python2.7 ./autonomous_processor.py $BASE/$dir_fetched $BASE/processed
-cd $dir_fetched
-rm -f *.bad
-cd $BASE
-./zip-fetched.sh
-)
-echo "=== ^ ^ ^ === $(basename $0) finished at $(date +'%F %T') with exitcode $?"
+echo "=== ^ ^ ^ === $(basename $0) finished at $(date +'%F %T')"
 echo ""
 ) >>$dir_log/$(basename $0 .sh).log 2>&1
