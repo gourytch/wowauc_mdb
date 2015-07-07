@@ -5,6 +5,13 @@ set -x
 cd $(dirname $(readlink -f $0))
 . wowauc.conf
 . wowauc-satellites.conf
+./check_fstree.sh
+
+lockdir="$locker/$(basename $0)"
+if ! mkdir $lockdir ; then
+  echo "Lock failed - exit" >&2
+  exit 1
+fi
 
 do_clean=false
 case "$1" in
@@ -20,8 +27,12 @@ mkdir -p $DESTINATION
 echo "sources   : $SSH_SATELLITES"
 echo "collector : $DESTINATION"
 
+log="$(basename $0) processing log:"
+
 for satellite in $SSH_SATELLITES
 do
+(
+set -e
 
 if $do_clean
 then
@@ -64,5 +75,22 @@ rsync -cruvz "$src" --exclude '*.bad' --exclude '*.tmp' $DESTINATION 2>&1 | tee 
 
 #################
 fi
+)
+rc="$?"
 
+if [ $rc -ne 0 ]
+then
+    log="$log
+<$satellite> failed"
+else
+    log="$log
+<$satellite> processed"
+fi
+ 
 done
+
+if which telegram_send.sh >/dev/null ; then
+  telegram_send.sh "$log"
+fi
+
+rmdir $lockdir

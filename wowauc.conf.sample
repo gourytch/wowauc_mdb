@@ -21,7 +21,7 @@ dbtmpl="template1"
 #
 # locker
 #
-locker="data/tmp/lock"
+locker="var/lock"
 
 #
 # directory settings (relative or absolute paths)
