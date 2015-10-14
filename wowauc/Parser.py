@@ -94,14 +94,18 @@ class Parser(object):
         try:
             R = json.loads(text)
             assert type(R) is dict, "not a dict but '{0}'".format(type(R))
-            assert "realm" in R, "have no 'realm' key"
-            assert "name" in R['realm'], "have no realm.name"
-            assert "slug" in R['realm'], "have no realm.slug"
-            assert "auctions" in R, "have no 'auctions' key"
-            assert "auctions" in R['auctions'], "have no auctions.auctions"
-            assert type(R['auctions']['auctions']) in (list, tuple), \
-                    "{0} have bad auctions type {1}" \
-                    .format(house, type(R['auctions']['auctions']))
+            if "realm" in R: # old style jsons
+                assert "name" in R['realm'], "have no realm.name"
+                assert "slug" in R['realm'], "have no realm.slug"
+                assert "auctions" in R, "have no 'auctions' key"
+                assert "auctions" in R['auctions'], "have no auctions.auctions"
+                assert type(R['auctions']['auctions']) in (list, tuple), \
+                        "{0} have bad auctions type {1}" \
+                        .format(house, type(R['auctions']['auctions']))
+            elif "realms" in R: # new style format       
+                assert "name" in R['realms'][0], "have no realm.name"
+                assert "slug" in R['realms'][0], "have no realm.slug"
+                assert "auctions" in R, "have no 'auctions' key"
             return R, "OK"
         except AssertionError as e:
             raise e
